@@ -79,79 +79,88 @@ of the targeted release**.]
 
 ## Summary
 
-We would like to use the user provided readiness conditions as a way to notify the control plane that a given pod needs to stop serving traffic and its respective endpoints need to be removed.
+We would like to introduce a new label that, once present on a pod, works as a way to indicate to the ReplicaSet controller that under exactly similar conditions, pods with the label should be preferred for removal over pods without the label.
 
 ## Motivation
 
-Currently `PodReadinessGate` requires a two-step update to the Pod for a user provided condition to be set to `true`.
+Currently, the ReplicaSet controller [has a defined set of rules](https://github.com/kubernetes/kubernetes/blob/6a19261e96b12c83e6c69d15e2dcca8089432838/pkg/controller/controller_utils.go#L831-L873) on how to decide on which pods to remove when scaling down.
 
-1. The `conditionType` is introduced when creating the pod
+Particulalry, if it needs to choose between pods that are in a `Running` state, the order in which it decides which pods to remove looks like the following
 
-2. The Pod `status` is patched to set the condition to `true`.
+```go
+	// TODO: take availability into account when we push minReadySeconds information from deployment into pods,
+	//       see https://github.com/kubernetes/kubernetes/issues/22065
+	// 5. Been ready for empty time < less time < more time
+	// If both pods are ready, the latest ready one is smaller
+	if podutil.IsPodReady(s.Pods[i]) && podutil.IsPodReady(s.Pods[j]) {
+		readyTime1 := podReadyTime(s.Pods[i])
+		readyTime2 := podReadyTime(s.Pods[j])
+		if !readyTime1.Equal(readyTime2) {
+			return afterOrZero(readyTime1, readyTime2)
+		}
+	}
+	// 6. Pods with containers with higher restart counts < lower restart counts
+	if maxContainerRestarts(s.Pods[i]) != maxContainerRestarts(s.Pods[j]) {
+		return maxContainerRestarts(s.Pods[i]) > maxContainerRestarts(s.Pods[j])
+	}
+	// 7. Empty creation time pods < newer pods < older pods
+	if !s.Pods[i].CreationTimestamp.Equal(&s.Pods[j].CreationTimestamp) {
+		return afterOrZero(&s.Pods[i].CreationTimestamp, &s.Pods[j].CreationTimestamp)
+	}
+```
+To summarize, when all pods are `Running` it prefers them for removal in the order below:
 
-While the behavior works for the initially intended purpose of this field (i.e., more control over when to make the Pod available for routing traffic), reversing this behavior is not easily achieved.
+```
+  - pods with less ready time over those with more ready time
+  - pods with higher restart counts over those with lower restart counts
+  - pods with empty creation time over newer pods over older pods
+```
 
-We would like to use the user provided readiness conditions as a way to notify the control plane that a given pod needs to stop serving traffic and its respective endpoints need to be removed.
-
-As such, ideally we would like to create the pod with the custom pod condition set to `true` by default to be able to toggle it to False and retrigger reconciliation at a later point as needed.
-
-`PodReadinessGate` supporting custom conditions defaulting to `true`, appears to be the right approach to it.
+However, this leaves no room for higher level controllers to influence or enforce removal of particular pods when they have knoweledge potentially missing to the lower level controllers (e.g. the `ReplicaSet`). In this proposal, we would like to suggest a mechanism for the higher level controls to be able to intervene in the process of pod removal. 
 
 ### Goals
 
-- `PodReadinessGate` supporting custom conditions defaulting to `true`
-
-[How will we know that this has succeeded?]
+- give control over pod lifecycle to higher level k8s controllers
 
 ### Non-Goals
 
-[What is out of scope for this KEP?]
-[Listing non-goals helps to focus discussion and make progress.]
+- have the higher level controllers directly deal with pod removal
+- expose any extra information about pod lifecyle management to higher level controllers.
 
 ## Proposal
+
+We would like to propose a modification to the pod ranking algorithm that ranks pods with a given label as higher priority for removal if pods are in a `Running` state. We propose this label to be named `kubernetes.io/prefer-for-scale-down`, and checks for pod removal when they are all in the `Running` state to have another check like the one added to the list below:
+
+
+```diff
++ - pods with the label kubernetes.io/prefer-for-scale-down over the others
+  - pods with less ready time over those with more ready time
+  - pods with higher restart counts over those with lower restart counts
+  - pods with empty creation time over newer pods over older pods
+```
+
+### User Stories
+
+#### Story 1
 
 At a high level the workflow is something like the following:
 
 1. Knative creates a deployment with custom PodReadinessGate set to true for its Pods.
 2. The deployment creates X number of Pods as specific in deployment's replicaCount
 3. At the time of scaledown:
- - Knative selectively toggles the PodReadinessGate condition to false, for the Y number of pods it intends to kill (basically marking them as not ready, based on metrics known to Knative autoscaler)
- - Knative autoscaler patches the replicaCount on the deployment to X - Y
+ - Knative autoscaler has knowledge about which pods to remove
+ - Knative autoscaler patches the pods it prefers for removal with the label `kubernetes.io/prefer-for-scale-down`
  - Kubernetes notices change in pod count expectations and removes the unready Pods following this comparison.
-
-Essentially the idea is to utilize readiness as a means to make k8s be more decisive about pods to kill when scaling down. This will potentially help with solving similar problems for k8s like discussed here: #45509
-
-We have tested and verified that changing Pod readiness allows for this behavior, but this is not uniformly achievable by failing the ReadinessProbe since configuraion parameters like FailureThreshold and TimeoutSeconds can delay the amount of time it takes for the Pod to become Not Ready.
-
-### User Stories [optional]
-
-[Detail the things that people will be able to do if this KEP is implemented.]
-[Include as much detail as possible so that people can understand the "how" of the system.]
-[The goal here is to make this feel real for users without getting bogged down.]
-
-#### Story 1
-
-[add here]
 
 ### Implementation Details/Notes/Constraints [optional]
 
-ReplicaSet controller has some built-in logic for which Pods to delete first. Allowing users to specify this requires some API & controller changes. 
-[add more here]
+ReplicaSet controller has some built-in logic for which Pods to delete first. Allowing users to specify this requires some API & controller changes. The modification would just add another check when ranking the pods, from the code snippet above.
 
 ### Risks and Mitigations
 
-[What are the risks of this proposal and how do we mitigate.]
-[Think broadly.]
-[For example, consider both security and how this will impact the larger kubernetes ecosystem.]
+We haven't identified any particular risk for the proposal. The ability for patching pods with a particular label is already managed via the security policies the k8s defines and only those with the ability to patch a pod can apply the label. 
 
-[How will security be reviewed and by whom?]
-[How will UX be reviewed and by whom?]
-
-[Consider including folks that also work outside the SIG or subproject.]
-
-## Design Details
-
-[add here]
+The label itself does not make for any removal decision and only helps the `ReplicaSet`controller with prioritization at the time of scaling down.
 
 ### Test Plan
 
