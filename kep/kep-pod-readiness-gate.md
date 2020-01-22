@@ -50,7 +50,7 @@ see-also:
 - [Infrastructure Needed [optional]](#infrastructure-needed-optional)
 <!-- /toc -->
 
-*NOTE*: all items in [square braket] are meta comments from the [kep-template](kep/kep-template.md)
+**NOTE**: all items in [square braket] are meta comments from the [kep-template](kep/kep-template.md)
 
 ## Release Signoff Checklist
 
