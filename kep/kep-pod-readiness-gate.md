@@ -50,6 +50,8 @@ see-also:
 - [Infrastructure Needed [optional]](#infrastructure-needed-optional)
 <!-- /toc -->
 
+*NOTE*: all items in [square braket] are meta comments from the [kep-template](kep/kep-template.md)
+
 ## Release Signoff Checklist
 
 [**ACTION REQUIRED:** In order to merge code into a release, there must be an issue in [kubernetes/enhancements] referencing this KEP and targeting a release milestone **before [Enhancement Freeze](https://github.com/kubernetes/sig-release/tree/master/releases)
