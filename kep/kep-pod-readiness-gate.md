@@ -39,7 +39,7 @@ see-also:
 - [Design Details](#design-details)
 <!-- /toc -->
 
-**NOTE**: all items in [square braket] are meta comments from the [kep-template](kep/kep-template.md)
+**NOTE**: all remaining items in [square braket] are meta comments from the [kep-template](kep/kep-template.md)
 
 ## Release Signoff Checklist
 
@@ -73,25 +73,25 @@ Currently, the ReplicaSet controller [has a defined set of rules](https://github
 Particulalry, if it needs to choose between pods that are in a `Running` state, the order in which it decides which pods to remove looks like the following
 
 ```go
-	// TODO: take availability into account when we push minReadySeconds information from deployment into pods,
-	//       see https://github.com/kubernetes/kubernetes/issues/22065
-	// 5. Been ready for empty time < less time < more time
-	// If both pods are ready, the latest ready one is smaller
-	if podutil.IsPodReady(s.Pods[i]) && podutil.IsPodReady(s.Pods[j]) {
-		readyTime1 := podReadyTime(s.Pods[i])
-		readyTime2 := podReadyTime(s.Pods[j])
-		if !readyTime1.Equal(readyTime2) {
-			return afterOrZero(readyTime1, readyTime2)
-		}
+// TODO: take availability into account when we push minReadySeconds information from deployment into pods,
+//       see https://github.com/kubernetes/kubernetes/issues/22065
+// 5. Been ready for empty time < less time < more time
+// If both pods are ready, the latest ready one is smaller
+if podutil.IsPodReady(s.Pods[i]) && podutil.IsPodReady(s.Pods[j]) {
+	readyTime1 := podReadyTime(s.Pods[i])
+	readyTime2 := podReadyTime(s.Pods[j])
+	if !readyTime1.Equal(readyTime2) {
+		return afterOrZero(readyTime1, readyTime2)
 	}
-	// 6. Pods with containers with higher restart counts < lower restart counts
-	if maxContainerRestarts(s.Pods[i]) != maxContainerRestarts(s.Pods[j]) {
-		return maxContainerRestarts(s.Pods[i]) > maxContainerRestarts(s.Pods[j])
-	}
-	// 7. Empty creation time pods < newer pods < older pods
-	if !s.Pods[i].CreationTimestamp.Equal(&s.Pods[j].CreationTimestamp) {
-		return afterOrZero(&s.Pods[i].CreationTimestamp, &s.Pods[j].CreationTimestamp)
-	}
+}
+// 6. Pods with containers with higher restart counts < lower restart counts
+if maxContainerRestarts(s.Pods[i]) != maxContainerRestarts(s.Pods[j]) {
+	return maxContainerRestarts(s.Pods[i]) > maxContainerRestarts(s.Pods[j])
+}
+// 7. Empty creation time pods < newer pods < older pods
+if !s.Pods[i].CreationTimestamp.Equal(&s.Pods[j].CreationTimestamp) {
+	return afterOrZero(&s.Pods[i].CreationTimestamp, &s.Pods[j].CreationTimestamp)
+}
 ```
 To summarize, when all pods are `Running` it prefers them for removal in the order below:
 
@@ -101,15 +101,15 @@ To summarize, when all pods are `Running` it prefers them for removal in the ord
   - pods with empty creation time over newer pods over older pods
 ```
 
-However, this leaves no room for higher level controllers to influence or enforce removal of particular pods when they have knoweledge potentially missing to the lower level controllers (e.g. the `ReplicaSet`). In this proposal, we would like to suggest a mechanism for the higher level controls to be able to intervene in the process of pod removal. 
+However, this leaves no room for higher level controllers to influence or enforce removal of particular pods when they have knoweledge potentially missing to the lower level controllers (e.g., the `ReplicaSet`). In this proposal, we would like to suggest a mechanism for the higher level controls to be able to intervene in the process of pod removal. 
 
 ### Goals
 
-- give control over pod lifecycle to higher level k8s controllers
+- give some control over pod lifecycle to higher level k8s controllers
 
 ### Non-Goals
 
-- have the higher level controllers directly deal with pod removal
+- have the higher level controllers directly deal with pod removals
 - expose any extra information about pod lifecyle management to higher level controllers.
 
 ## Proposal
@@ -130,8 +130,8 @@ We would like to propose a modification to the pod ranking algorithm that ranks 
 
 At a high level the workflow is something like the following:
 
-1. Knative creates a deployment with custom PodReadinessGate set to true for its Pods.
-2. The deployment creates X number of Pods as specific in deployment's replicaCount
+1. Knative creates a deployment with custom `PodReadinessGate` set to true for its Pods.
+2. The deployment creates X number of Pods as specific in deployment's `replicaCount`
 3. At the time of scaledown:
  - Knative autoscaler has knowledge about which pods to remove
  - Knative autoscaler patches the pods it prefers for removal with the label `kubernetes.io/prefer-for-scale-down`
@@ -139,10 +139,10 @@ At a high level the workflow is something like the following:
 
 ### Implementation Details/Notes/Constraints [optional]
 
-ReplicaSet controller has some built-in logic for which Pods to delete first. Allowing users to specify this requires some API & controller changes. The modification would just add another check when ranking the pods, from the code snippet above.
+The `ReplicaSet` controller has some built-in logic for which Pods to delete first; allowing users to specify this requires some API & controller changes. The modification proposed here would just add another check when ranking the pods, from the code snippet above.
 
 ### Risks and Mitigations
 
-We haven't identified any particular risk for the proposal. The ability for patching pods with a particular label is already managed via the security policies the k8s defines and only those with the ability to patch a pod can apply the label. 
+We haven't identified any particular risk for the proposal. The ability for patching pods with a particular label is already managed via the security policies k8s defines and only those with the ability to patch a pod can apply the label. 
 
-The label itself does not make for any removal decision and only helps the `ReplicaSet`controller with prioritization at the time of scaling down.
+The label itself does not make for any removal decisions and only helps the `ReplicaSet`controller with prioritization at the time of scaling down.
